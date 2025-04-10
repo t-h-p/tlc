@@ -1,5 +1,5 @@
-use logos::Logos;
-
+use logos::{Logos, Lexer};
+use lexical_core::parse;
 
 /// Lua language tokens.
 ///
@@ -112,14 +112,38 @@ enum LuaToken<'source> {
     //==---------------
     // Number literals
     //==---------------
-    #[regex(r"[0-9][0-9_]*", |text| text.slice())]
-    Integer(&'source str),
-    #[regex("0x[0-9a-fA-F]")]
-    HexInteger(&'source str),
-    #[regex("[0-9]*[0-9]*")]
-    Float(&'source str),
+    #[regex(r"[0-9][0-9_]*|0[xX][0-9a-fA-F][0-9a-fA-F_]*", as_int)]
+    Integer(i64),
+    #[regex(r"([0-9][0-9_]*\.[0-9][0-9_]*)|(0[xX][0-9a-fA-F][0-9a-fA-F_]*\.[0-9a-fA-F][0-9a-fA-F_]*)", as_float)]
+    Float(f64),
+}
+
+fn as_int<'source>(text: &mut Lexer<'source, LuaToken<'source>>) -> Option<i64> {
+    let s: String = text.slice().trim_start_matches("0x").trim_start_matches("0X").replace("_","");
+
+
+
+    let as_int: Result<i64, lexical_core::Error> = parse(s.as_bytes());
+
+    match as_int {
+        Ok(val) => Some(val),
+        Err(_) => None,
+    }
 
 }
+
+fn as_float<'source>(text: &mut Lexer<'source, LuaToken<'source>>) -> Option<f64> {
+
+    let s= text.slice().trim_start_matches("0x").trim_start_matches("0X").replace("_","");
+
+    let as_float: Result<f64, lexical_core::Error> = parse(s.as_bytes());
+
+    match as_float {
+        Ok(val) => Some(val),
+        Err(_) => None,
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -143,6 +167,28 @@ mod tests {
         assert_eq!(lex.next(), Some(Ok(LuaToken::Identifier("id1"))));
         assert_eq!(lex.next(), Some(Ok(LuaToken::Identifier("Id2"))));
         assert_eq!(lex.next(), Some(Ok(LuaToken::Identifier("Id_3"))));
+    }
+    #[test]
+    fn lex_int() {
+        let mut lex = LuaToken::lexer("0 1 0x1 9 10 99 1_000");
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Integer(0))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Integer(1))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Integer(1))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Integer(9))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Integer(10))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Integer(99))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Integer(1_000))));
+    }
+    #[test]
+    fn lex_float() {
+        let mut lex = LuaToken::lexer("0.0 1.0 0x1.1 9.0 10.123_4 0_.99 1_000.0000_000");
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Float(0.0))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Float(1.0))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Float(1.1))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Float(9.0))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Float(10.1234))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Float(0.99))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Float(1000.00000000))));
     }
     /*
     #[test]

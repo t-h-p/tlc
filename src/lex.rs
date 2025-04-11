@@ -1,5 +1,5 @@
 use logos::{Logos, Lexer};
-use lexical_core::parse;
+use lexical_core;
 
 /// Lua language tokens.
 ///
@@ -10,7 +10,8 @@ use lexical_core::parse;
 #[logos(skip r"[ \t\n\f]+")]
 #[logos(skip r"--[^\n]*")]
 #[logos(skip r"--\[\[(.|\n)--\]\]")]
-enum LuaToken<'source> {
+#[logos(skip r"\#\![^\n]*")]
+pub enum LuaToken<'source> {
     //==--------
     // Keywords
     //==--------
@@ -93,18 +94,30 @@ enum LuaToken<'source> {
     Concatenate,
     #[token("#")]
     Length,
+    #[token("[")]
+    LBracket,
+    #[token("]")]
+    RBracket,
     //==----------
     // Identifier
     //==----------
     #[regex("[a-zA-Z_][a-zA-Z_0-9]*", |text| text.slice())]
     Identifier(&'source str),
+    /*
+    #[regex(r"[a-zA-Z_][a-zA-Z_0-9]*\[[a-zA-Z_][a-zA-Z_]*\]")]
+    IdTableIndex((&'source str, &'source str)),
+    #[regex(r#"\"[a-zA-Z_][a-zA-Z_0-9]*\[[a-zA-Z_][a-zA-Z_]*\]\""#)]
+    StringTableIndex((&'source str, &'source str)),
+    */
     //==---------------
     // String literals
     //==---------------
-    #[regex("\"([^\"\n]*)\"", |text| text.slice())]
-    DoubleQuoteString(&'source str),
+    #[regex("\"[^\"\n]*\"|'[^'\n]*'", |text| text.slice()[1..text.slice().len()-1].trim())]
+    String(&'source str),
+    /*
     #[regex("'([^'\n]*)'", |text| text.slice())]
     SingleQuoteString(&'source str),
+    */
     /*
     #[regex(r"\[\[(.|\n)\]\]")]
     MultipleLineString(&'source str),
@@ -121,9 +134,9 @@ enum LuaToken<'source> {
 fn as_int<'source>(text: &mut Lexer<'source, LuaToken<'source>>) -> Option<i64> {
     let s: String = text.slice().trim_start_matches("0x").trim_start_matches("0X").replace("_","");
 
+    // Add scientific notation handling (e & p).
 
-
-    let as_int: Result<i64, lexical_core::Error> = parse(s.as_bytes());
+    let as_int: Result<i64, lexical_core::Error> = lexical_core::parse(s.as_bytes());
 
     match as_int {
         Ok(val) => Some(val),
@@ -136,14 +149,15 @@ fn as_float<'source>(text: &mut Lexer<'source, LuaToken<'source>>) -> Option<f64
 
     let s= text.slice().trim_start_matches("0x").trim_start_matches("0X").replace("_","");
 
-    let as_float: Result<f64, lexical_core::Error> = parse(s.as_bytes());
+    // Add scientific notation handling (e & p).
+
+    let as_float: Result<f64, lexical_core::Error> = lexical_core::parse(s.as_bytes());
 
     match as_float {
         Ok(val) => Some(val),
         Err(_) => None,
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -152,13 +166,13 @@ mod tests {
     #[test]
     fn lex_single_quote_str() {
         let mut lex = LuaToken::lexer("'This is a single line, single quoted string'");
-        assert_eq!(lex.next(), Some(Ok(LuaToken::SingleQuoteString("'This is a single line, single quoted string'"))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::String("This is a single line, single quoted string"))));
         assert_eq!(lex.slice(), "'This is a single line, single quoted string'");
     }
     #[test]
     fn lex_double_quote_str() {
         let mut lex = LuaToken::lexer("\"This is a single line, double quoted string\"");
-        assert_eq!(lex.next(), Some(Ok(LuaToken::DoubleQuoteString("\"This is a single line, double quoted string\""))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::String("This is a single line, double quoted string"))));
         assert_eq!(lex.slice(), "\"This is a single line, double quoted string\"");
     }
     #[test]
@@ -190,6 +204,27 @@ mod tests {
         assert_eq!(lex.next(), Some(Ok(LuaToken::Float(0.99))));
         assert_eq!(lex.next(), Some(Ok(LuaToken::Float(1000.00000000))));
     }
+    #[test]
+    fn lex_array_and_table() {
+        let mut lex = LuaToken::lexer("my_array[1] other_array[\"x\"]");
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Identifier("my_array"))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::LBracket)));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Integer(1))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::RBracket)));
+
+        assert_eq!(lex.next(), Some(Ok(LuaToken::Identifier("other_array"))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::LBracket)));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::String("x"))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::RBracket)));
+    }
+    /*
+    #[test]
+    fn lex_table_index() {
+        let mut lex = LuaToken::lexer("args[1] other_args[1_0]");
+        assert_eq!(lex.next(), Some(Ok(LuaToken::TableIndex(("args",1)))));
+        assert_eq!(lex.next(), Some(Ok(LuaToken::TableIndex(("other_args",10)))));
+    }
+    */
     /*
     #[test]
     fn lex_multiple_line_str() {
